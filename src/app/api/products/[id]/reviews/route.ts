@@ -107,7 +107,7 @@ async function postHandler(request: NextRequest, context: RouteContext) {
   // Check if user already reviewed this product
   const existingReview = await prisma.review.findUnique({
     where: {
-      productId_userId: { productId: id, viserId: auth.user.id },
+      productId_userId: { productId: id, userId: auth.user.id },
     },
   })
 
