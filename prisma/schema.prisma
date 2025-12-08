@@ -45,6 +45,13 @@ model User {
   apiKeys       ApiKey[]
   notifications Notification[]
 
+  // Optica Proprietary Tech Relations
+  faceAnalyses        FaceAnalysis[]
+  prescriptions       PrescriptionRecord[]
+  lensRecommendations LensRecommendation[]
+  tryOnSessions       VirtualTryOnSession[]
+  fitFeedback         FitFeedback[]
+
   @@index([email])
   @@index([role])
 }
@@ -203,6 +210,10 @@ model Product {
   wishlistItems   WishlistItem[]
   collections     CollectionProduct[]
   tags            ProductTag[]
+
+  // Optica Proprietary Tech Relations
+  frameRecommendations FrameRecommendation[]
+  fitFeedback          FitFeedback[]
 
   @@index([slug])
   @@index([sku])
@@ -695,4 +706,346 @@ model AuditLog {
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// ==================== OPTICA PROPRIETARY TECH ====================
+
+// -------------------- OpticaVision: Face Analysis --------------------
+
+enum FaceShape {
+  OVAL
+  ROUND
+  SQUARE
+  HEART
+  OBLONG
+  DIAMOND
+  TRIANGLE
+}
+
+enum SkinTone {
+  WARM
+  COOL
+  NEUTRAL
+}
+
+model FaceAnalysis {
+  id                String    @id @default(cuid())
+  userId            String?
+  sessionId         String?   // For anonymous users
+
+  // Face Shape Classification
+  faceShape         FaceShape
+  faceShapeConfidence Float   @default(0)
+
+  // Facial Measurements (in mm)
+  faceWidth         Float     // Temple to temple
+  faceLength        Float     // Forehead to chin
+  foreheadWidth     Float
+  cheekboneWidth    Float
+  jawWidth          Float
+  noseBridgeHeight  Float?
+  noseBridgeWidth   Float?
+
+  // Derived Proportions
+  widthToLengthRatio Float
+  foreheadToJawRatio Float
+
+  // Color Analysis
+  skinTone          SkinTone?
+  hairColor         String?   // Primary detected hair color
+  eyeColor          String?   // Primary detected eye color
+
+  // Recommended Frame Attributes
+  recommendedShapes     FrameShape[]
+  recommendedMaterials  FrameMaterial[]
+  recommendedColors     String[]        // Hex codes
+
+  // Optimal Frame Dimensions
+  optimalFrameWidth     Int?            // mm
+  optimalBridgeWidth    Int?            // mm
+  optimalTempleLength   Int?            // mm
+
+  // Processing metadata
+  imageHash         String?             // Hash of analyzed image (privacy)
+  processingVersion String   @default("1.0")
+  processedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recommendations   FrameRecommendation[]
+  tryOnSessions     VirtualTryOnSession[]
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([faceShape])
+}
+
+model FrameRecommendation {
+  id                String   @id @default(cuid())
+  faceAnalysisId    String
+  productId         String
+
+  // Scoring
+  overallScore      Float    // 0-100 composite score
+  shapeScore        Float    // How well shape complements face
+  sizeScore         Float    // How well dimensions fit
+  colorScore        Float    // Color harmony score
+  styleScore        Float    // Style preference match
+
+  // Explanations
+  matchReasons      String[] // ["Rectangular frames balance round faces", ...]
+  warnings          String[] // ["Frame may be too wide", ...]
+
+  // Ranking
+  rank              Int      // Position in recommendations
+
+  // Feedback
+  userFeedback      String?  // LIKED, DISLIKED, PURCHASED, RETURNED
+  feedbackAt        DateTime?
+
+  createdAt         DateTime @default(now())
+
+  faceAnalysis      FaceAnalysis @relation(fields: [faceAnalysisId], references: [id], onDelete: Cascade)
+  product           Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([faceAnalysisId, productId])
+  @@index([faceAnalysisId])
+  @@index([productId])
+  @@index([overallScore])
+}
+
+// -------------------- OpticaScan: Prescription Verification --------------------
+
+enum PrescriptionStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+model PrescriptionRecord {
+  id                String             @id @default(cuid())
+  userId            String
+
+  // Prescription Values - Right Eye (OD)
+  odSphere          Float?             // -20.00 to +20.00
+  odCylinder        Float?             // -6.00 to +6.00
+  odAxis            Int?               // 1 to 180
+  odAdd             Float?             // For progressives/bifocals
+  odPrism           Float?
+  odPrismDirection  String?            // BU, BD, BI, BO
+
+  // Prescription Values - Left Eye (OS)
+  osSphere          Float?
+  osCylinder        Float?
+  osAxis            Int?
+  osAdd             Float?
+  osPrism           Float?
+  osPrismDirection  String?
+
+  // Pupillary Distance
+  pdSingle          Float?             // Single PD
+  pdRight           Float?             // Monocular PD - Right
+  pdLeft            Float?             // Monocular PD - Left
+
+  // Prescription Metadata
+  prescribedDate    DateTime?
+  expirationDate    DateTime?
+  prescriberName    String?
+  prescriberLicense String?
+  prescriberPhone   String?
+  clinicName        String?
+  clinicAddress     String?
+
+  // Verification
+  status            PrescriptionStatus @default(PENDING_VERIFICATION)
+  verifiedAt        DateTime?
+  verifiedBy        String?            // Staff user ID
+  rejectionReason   String?
+
+  // Source
+  sourceType        String             // MANUAL, OCR_SCAN, API_IMPORT
+  sourceImageUrl    String?            // Encrypted reference
+  ocrConfidence     Float?             // 0-1 confidence score
+  ocrRawData        Json?              // Raw OCR extraction
+
+  // Privacy
+  isActive          Boolean  @default(true)
+  consentGiven      Boolean  @default(false)
+  consentAt         DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lensRecommendations LensRecommendation[]
+  shareLinks        PrescriptionShare[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([expirationDate])
+}
+
+// -------------------- OpticaVault: Prescription Sharing --------------------
+
+model PrescriptionShare {
+  id                  String   @id @default(cuid())
+  prescriptionId      String
+
+  // Share Token
+  shareToken          String   @unique @default(cuid())
+
+  // Access Control
+  recipientEmail      String?
+  recipientName       String?
+  accessCount         Int      @default(0)
+  maxAccessCount      Int?     // null = unlimited
+
+  // Validity
+  expiresAt           DateTime?
+  isActive            Boolean  @default(true)
+
+  // Audit
+  lastAccessedAt      DateTime?
+  lastAccessedBy      String?  // IP or identifier
+
+  createdAt           DateTime @default(now())
+
+  prescription        PrescriptionRecord @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([shareToken])
+  @@index([prescriptionId])
+}
+
+// -------------------- OpticaLens: Lens Configuration --------------------
+
+enum LensIndex {
+  STANDARD_1_50       // CR-39, standard
+  MID_INDEX_1_56
+  MID_INDEX_1_59      // Polycarbonate
+  HIGH_INDEX_1_60
+  HIGH_INDEX_1_67
+  ULTRA_HIGH_1_74
+}
+
+enum LensCoating {
+  ANTI_REFLECTIVE
+  BLUE_LIGHT_FILTER
+  SCRATCH_RESISTANT
+  UV_PROTECTION
+  ANTI_SMUDGE
+  HYDROPHOBIC
+  PHOTOCHROMIC
+  POLARIZED
+  MIRROR
+}
+
+model LensRecommendation {
+  id                  String   @id @default(cuid())
+  prescriptionId      String?
+  userId              String?
+  sessionId           String?
+
+  // Input Context
+  usageType           String   // EVERYDAY, COMPUTER, READING, DRIVING, SPORTS
+  budgetRange         String   // BUDGET, MID_RANGE, PREMIUM
+  priorityFactors     String[] // THIN_LIGHT, DURABILITY, CLARITY, PROTECTION
+
+  // Recommended Configuration
+  lensIndex           LensIndex
+  lensDesign          String   // SINGLE_VISION, PROGRESSIVE, BIFOCAL, OFFICE
+  recommendedCoatings LensCoating[]
+
+  // Calculated Values
+  estimatedThicknessCenter Float? // mm
+  estimatedThicknessEdge   Float? // mm
+  estimatedWeight          Float? // grams per lens
+
+  // Pricing
+  estimatedCost       Float?
+
+  // Explanation
+  recommendations     Json     // Detailed explanation object
+
+  createdAt           DateTime @default(now())
+
+  prescription        PrescriptionRecord? @relation(fields: [prescriptionId], references: [id])
+  user                User?    @relation(fields: [userId], references: [id])
+
+  @@index([prescriptionId])
+  @@index([userId])
+  @@index([sessionId])
+}
+
+// -------------------- OpticaFit: Virtual Try-On --------------------
+
+model VirtualTryOnSession {
+  id                String   @id @default(cuid())
+  userId            String?
+  sessionId         String?
+  faceAnalysisId    String?
+
+  // Session Data
+  productsViewed    String[] // Product IDs
+  productsSaved     String[] // Products user liked
+  timeSpentSeconds  Int      @default(0)
+
+  // Device Info
+  deviceType        String?  // MOBILE, TABLET, DESKTOP
+  browserInfo       String?
+
+  // Conversion
+  addedToCart       Boolean  @default(false)
+  purchased         Boolean  @default(false)
+  orderId           String?
+
+  // Quality Metrics
+  renderQuality     String?  // LOW, MEDIUM, HIGH
+  userRating        Int?     // 1-5 rating of experience
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User?         @relation(fields: [userId], references: [id])
+  faceAnalysis      FaceAnalysis? @relation(fields: [faceAnalysisId], references: [id])
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([faceAnalysisId])
+}
+
+// -------------------- ML Training Data Collection --------------------
+
+model FitFeedback {
+  id                String   @id @default(cuid())
+  userId            String?
+  orderId           String?
+  productId         String
+
+  // Fit Assessment
+  overallFit        Int      // 1-5
+  widthFit          String?  // TOO_NARROW, PERFECT, TOO_WIDE
+  bridgeFit         String?  // TOO_TIGHT, PERFECT, TOO_LOOSE
+  templeFit         String?  // TOO_SHORT, PERFECT, TOO_LONG
+  weightComfort     Int?     // 1-5
+
+  // Comparison to Expectation
+  matchedExpectation Boolean?
+
+  // Free-form
+  comments          String?
+
+  // Used for Training
+  includedInTraining Boolean @default(false)
+
+  createdAt         DateTime @default(now())
+
+  user              User?    @relation(fields: [userId], references: [id])
+  product           Product  @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([userId])
 }
